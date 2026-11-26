@@ -20,6 +20,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Enumeration;
 import java.util.StringJoiner;
 import java.util.regex.Pattern;
 
@@ -91,6 +92,10 @@ public class JettyCustomPlatformHttpConsumer extends DefaultConsumer {
                     }
                     createUoW(exchange);
                     getProcessor().process(exchange);
+                    if (exchange.getException() != null) {
+                        // do not report success when the route failed processing the exchange
+                        throw exchange.getException();
+                    }
                     httpServletResponse.setStatus(HttpServletResponse.SC_OK);
                     request.setHandled(true);
                     if (getEndpoint().isHttpProxy()) {
@@ -103,6 +108,8 @@ public class JettyCustomPlatformHttpConsumer extends DefaultConsumer {
                 } catch (Exception e) {
                     getExceptionHandler().handleException("Failed handling platform-http endpoint " + endpoint.getPath(), exchg,
                             e);
+                    httpServletResponse.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    request.setHandled(true);
                 } finally {
                     if (exchg != null) {
                         doneUoW(exchg);
@@ -121,6 +128,16 @@ public class JettyCustomPlatformHttpConsumer extends DefaultConsumer {
         if (charset != null) {
             exchange.setProperty(Exchange.CHARSET_NAME, charset);
             message.setHeader(Exchange.HTTP_CHARACTER_ENCODING, charset);
+        }
+
+        final Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            String headerValue = request.getHeader(headerName);
+            if (getEndpoint().getHeaderFilterStrategy().applyFilterToExternalHeaders(headerName, headerValue, exchange)) {
+                continue;
+            }
+            message.setHeader(headerName, headerValue);
         }
 
         message.setBody(body.length() != 0 ? body : null);
